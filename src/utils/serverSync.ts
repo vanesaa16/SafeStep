@@ -34,6 +34,7 @@ export function resolveApiUrl(apiPath: string): string {
 
 let cachedBackendAvailable: boolean | null =
   isStandaloneHtmlMode && !getConfiguredApiBaseUrl() ? false : null;
+let cachedServerHasGeminiTts: boolean | null = null;
 let backendProbePromise: Promise<boolean> | null = null;
 
 export function isBackendKnownUnavailable(): boolean {
@@ -41,21 +42,34 @@ export function isBackendKnownUnavailable(): boolean {
   return cachedBackendAvailable === false;
 }
 
+export function isServerGeminiTtsAvailable(): boolean | null {
+  if (isStandaloneHtmlMode && !getConfiguredApiBaseUrl()) return false;
+  return cachedServerHasGeminiTts;
+}
+
+export function markServerGeminiTtsUnavailable(): void {
+  cachedServerHasGeminiTts = false;
+}
+
 export function resetBackendAvailabilityCache(): void {
   if (isStandaloneHtmlMode && !getConfiguredApiBaseUrl()) {
     cachedBackendAvailable = false;
+    cachedServerHasGeminiTts = false;
     return;
   }
   cachedBackendAvailable = null;
+  cachedServerHasGeminiTts = null;
 }
 
 export async function checkApiBackendAvailable(): Promise<boolean> {
   if (typeof window === "undefined") {
     cachedBackendAvailable = false;
+    cachedServerHasGeminiTts = false;
     return false;
   }
   if (isStandaloneHtmlMode && !getConfiguredApiBaseUrl()) {
     cachedBackendAvailable = false;
+    cachedServerHasGeminiTts = false;
     return false;
   }
   if (cachedBackendAvailable !== null) {
@@ -77,18 +91,30 @@ export async function checkApiBackendAvailable(): Promise<boolean> {
       const contentType = response.headers.get("content-type") || "";
       if (!response.ok || !contentType.includes("application/json")) {
         cachedBackendAvailable = false;
+        cachedServerHasGeminiTts = false;
         return false;
       }
-      const data = (await response.json()) as { ok?: boolean; hasBackend?: boolean };
+      const data = (await response.json()) as {
+        ok?: boolean;
+        hasBackend?: boolean;
+        hasGeminiTts?: boolean;
+      };
       const available = Boolean(data?.ok && data?.hasBackend);
       cachedBackendAvailable = available;
+      cachedServerHasGeminiTts = available
+        ? typeof data?.hasGeminiTts === "boolean"
+          ? data.hasGeminiTts
+          : null
+        : false;
       return available;
     } catch {
       // Do not permanently lock false if offline/transient; allow retry on next online event
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         cachedBackendAvailable = null;
+        cachedServerHasGeminiTts = null;
       } else {
         cachedBackendAvailable = false;
+        cachedServerHasGeminiTts = false;
       }
       return false;
     } finally {

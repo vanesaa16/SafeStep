@@ -90,6 +90,7 @@ const LOCATION_MELODIES: Record<AmbientLocationId, number[]> = {
 
 let sharedAudioContext: AudioContext | null = null;
 let currentAudio: HTMLAudioElement | null = null;
+let currentWebAudioVoiceSource: AudioBufferSourceNode | null = null;
 let voicePlaybackToken = 0;
 let activeSpeakingCallback: ((speaking: boolean) => void) | null = null;
 const externalVoiceStoppers = new Set<() => void>();
@@ -119,15 +120,84 @@ const TEACHER_RETRY_AUDIO_POOL = [
 let correctPoolIndex = 0;
 let retryPoolIndex = 0;
 
-// Pre-cached audio instances for zero-delay (0ms) instant playback
+// Pre-cached audio instances & decoded Web Audio buffers for zero-delay (0ms) instant playback
 const preloadedAudioMap = new Map<string, HTMLAudioElement>();
+const decodedFileAudioCache = new Map<string, AudioBuffer>();
+const inFlightFileAudioDecode = new Map<string, Promise<AudioBuffer | null>>();
+
+function decodeDataUriToArrayBuffer(dataUri: string): ArrayBuffer | null {
+  try {
+    const commaIdx = dataUri.indexOf(",");
+    if (commaIdx === -1) return null;
+    const meta = dataUri.slice(0, commaIdx);
+    const body = dataUri.slice(commaIdx + 1);
+    if (!meta.includes(";base64")) return null;
+    const binary = window.atob(body);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  } catch {
+    return null;
+  }
+}
+
+async function decodeUrlToAudioBuffer(
+  url: string,
+  ctx: AudioContext
+): Promise<AudioBuffer | null> {
+  if (!url) return null;
+  const cached = decodedFileAudioCache.get(url);
+  if (cached) return cached;
+
+  const existingFlight = inFlightFileAudioDecode.get(url);
+  if (existingFlight) return existingFlight;
+
+  const task = (async (): Promise<AudioBuffer | null> => {
+    try {
+      let rawBuffer: ArrayBuffer | null = null;
+      if (url.startsWith("data:")) {
+        rawBuffer = decodeDataUriToArrayBuffer(url);
+      } else {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const ctype = res.headers.get("content-type") || "";
+        if (ctype.includes("text/html")) return null;
+        rawBuffer = await res.arrayBuffer();
+      }
+      if (!rawBuffer || rawBuffer.byteLength === 0) return null;
+
+      const decoded = await ctx.decodeAudioData(rawBuffer.slice(0));
+      if (decodedFileAudioCache.size >= 80) {
+        const oldestKey = decodedFileAudioCache.keys().next().value;
+        if (oldestKey) decodedFileAudioCache.delete(oldestKey);
+      }
+      decodedFileAudioCache.set(url, decoded);
+      return decoded;
+    } catch {
+      return null;
+    } finally {
+      inFlightFileAudioDecode.delete(url);
+    }
+  })();
+
+  inFlightFileAudioDecode.set(url, task);
+  return task;
+}
 
 export const preloadAudio = (url: string) => {
-  if (typeof window === "undefined" || !url || preloadedAudioMap.has(url)) return;
+  if (typeof window === "undefined" || !url) return;
   try {
-    const audio = new Audio(url);
-    audio.preload = "auto";
-    preloadedAudioMap.set(url, audio);
+    const ctx = audioManager?.getDecodingAudioContext?.();
+    if (ctx && !decodedFileAudioCache.has(url) && !inFlightFileAudioDecode.has(url)) {
+      void decodeUrlToAudioBuffer(url, ctx);
+    }
+    if (!url.startsWith("data:") && !preloadedAudioMap.has(url)) {
+      const audio = new Audio(url);
+      audio.preload = "auto";
+      preloadedAudioMap.set(url, audio);
+    }
   } catch {
     // Ignore preload error
   }
@@ -138,6 +208,18 @@ if (typeof window !== "undefined" && !isStandaloneHtmlMode) {
   [...TEACHER_CORRECT_AUDIO_POOL, ...TEACHER_RETRY_AUDIO_POOL].forEach((url) => {
     preloadAudio(url);
   });
+}
+
+function playSilentUnlockPulse(ctx: AudioContext): void {
+  try {
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  } catch {
+    // Ignore
+  }
 }
 
 /**
@@ -155,16 +237,37 @@ export const unlockAudio = () => {
     }
   }
 
-  if (sharedAudioContext && sharedAudioContext.state === "suspended") {
-    sharedAudioContext.resume().catch(() => {});
+  if (sharedAudioContext) {
+    if (sharedAudioContext.state === "suspended") {
+      sharedAudioContext
+        .resume()
+        .then(() => {
+          if (sharedAudioContext) {
+            playSilentUnlockPulse(sharedAudioContext);
+          }
+        })
+        .catch(() => {});
+    } else if (sharedAudioContext.state === "running") {
+      playSilentUnlockPulse(sharedAudioContext);
+    }
   }
 };
 
 /**
- * Menghentikan HTMLAudioElement lokal yang sedang diputar tanpa memicu recursion ke external stoppers
+ * Menghentikan HTMLAudioElement maupun Web Audio lokal yang sedang diputar tanpa recursion ke external stoppers
  */
 export const stopLocalVoiceAudio = () => {
   voicePlaybackToken += 1;
+  if (currentWebAudioVoiceSource) {
+    try {
+      currentWebAudioVoiceSource.onended = null;
+      currentWebAudioVoiceSource.stop();
+      currentWebAudioVoiceSource.disconnect();
+    } catch {
+      // Ignore already stopped source
+    }
+    currentWebAudioVoiceSource = null;
+  }
   if (currentAudio) {
     try {
       currentAudio.onended = null;
@@ -210,10 +313,7 @@ export interface PlayVoiceOptions {
 
 /**
  * Pemutar Audio Tunggal Non-Bertumpuk (Suara NPC atau Suara Ibu/Bapak Guru asli)
- * @param text Teks dialog/apresiasi
- * @param audioPath Jalur file MP3/WAV lokal (opsional, contoh: "/audio/feedback_soal_1_benar.mp3")
- * @param onSpeakingChange Callback saat status audio berbicara berubah
- * @param options Peran pembicara ("npc" vs "teacher") agar suara guru TIDAK pernah muncul sebelum anak menjawab
+ * Menggunakan Web Audio `AudioBufferSourceNode` sebagai jalur utama agar kebal terhadap blokir autoplay iframe.
  */
 export const playVoice = async (
   text: string,
@@ -271,6 +371,73 @@ export const playVoice = async (
   activeSpeakingCallback = onSpeakingChange || null;
   onSpeakingChange?.(true);
 
+  const finishPlayback = () => {
+    if (myToken !== voicePlaybackToken) return;
+    if (activeSpeakingCallback === onSpeakingChange) {
+      activeSpeakingCallback = null;
+    }
+    onSpeakingChange?.(false);
+  };
+
+  // Primary Path: Unlocked Web Audio API (bypasses cross-origin iframe HTMLAudioElement autoplay blocks)
+  const bus = audioManager.getVoicePlaybackBus();
+  if (bus) {
+    try {
+      if (bus.ctx.state === "suspended") {
+        await Promise.race([
+          bus.ctx.resume().catch(() => {}),
+          new Promise<void>((r) => window.setTimeout(r, 150)),
+        ]);
+      }
+      if (myToken !== voicePlaybackToken) return;
+
+      const audioBuffer = await decodeUrlToAudioBuffer(targetPath, bus.ctx);
+      if (myToken !== voicePlaybackToken) return;
+
+      if (audioBuffer) {
+        await new Promise<void>((resolve) => {
+          try {
+            const src = bus.ctx.createBufferSource();
+            src.buffer = audioBuffer;
+            src.connect(bus.voiceGain);
+            currentWebAudioVoiceSource = src;
+
+            let settled = false;
+            const cleanup = () => {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(safetyTimer);
+              if (currentWebAudioVoiceSource === src) {
+                currentWebAudioVoiceSource = null;
+              }
+              try {
+                src.onended = null;
+                src.disconnect();
+              } catch {
+                // Ignore
+              }
+              finishPlayback();
+              resolve();
+            };
+
+            const safetyTimer = window.setTimeout(
+              cleanup,
+              Math.max(2500, Math.ceil(audioBuffer.duration * 1000) + 1200)
+            );
+            src.onended = cleanup;
+            src.start(bus.ctx.currentTime + 0.005);
+          } catch {
+            resolve();
+          }
+        });
+        return;
+      }
+    } catch {
+      // Fall through to HTMLAudioElement backup below
+    }
+  }
+
+  // Secondary Path: HTMLAudioElement fallback
   try {
     preloadAudio(targetPath);
     const audio = new Audio(targetPath);
@@ -288,10 +455,7 @@ export const playVoice = async (
         if (currentAudio === audio) {
           currentAudio = null;
         }
-        if (activeSpeakingCallback === onSpeakingChange) {
-          activeSpeakingCallback = null;
-        }
-        onSpeakingChange?.(false);
+        finishPlayback();
         resolve();
       };
       audio.onerror = (err) => {
@@ -330,10 +494,7 @@ export const playVoice = async (
   } catch (error) {
     if (myToken === voicePlaybackToken) {
       console.warn(`[Audio] Pemutaran audio (${targetPath}) memerlukan gesture atau gagal:`, error);
-      if (activeSpeakingCallback === onSpeakingChange) {
-        activeSpeakingCallback = null;
-      }
-      onSpeakingChange?.(false);
+      finishPlayback();
     }
   }
 };
@@ -534,18 +695,24 @@ class SafeStepAudioManager {
         ctx
           .resume()
           .then(() => {
-            this.syncBuses();
+            playSilentUnlockPulse(ctx);
+            this.syncBuses(true);
             this.ensureAmbientRunning();
           })
           .catch(() => {});
       } else {
+        this.syncBuses();
         this.ensureAmbientRunning();
       }
     };
 
-    window.addEventListener("pointerdown", unlock, { passive: true });
-    window.addEventListener("keydown", unlock, { passive: true });
-    window.addEventListener("touchstart", unlock, { passive: true });
+    const opts: AddEventListenerOptions = { capture: true, passive: true };
+    window.addEventListener("pointerdown", unlock, opts);
+    window.addEventListener("mousedown", unlock, opts);
+    window.addEventListener("click", unlock, opts);
+    window.addEventListener("touchstart", unlock, opts);
+    window.addEventListener("touchend", unlock, opts);
+    window.addEventListener("keydown", unlock, opts);
   }
 
   private ensureContext(): AudioContext | null {
@@ -583,6 +750,13 @@ class SafeStepAudioManager {
       this.voiceGain.connect(this.masterGain);
 
       this.syncBuses(true);
+
+      this.ctx.addEventListener("statechange", () => {
+        if (this.ctx?.state === "running" && this.getSoundEnabled()) {
+          this.syncBuses(true);
+          this.ensureAmbientRunning();
+        }
+      });
     }
 
     if (this.ctx.state === "suspended" && this.getSoundEnabled()) {

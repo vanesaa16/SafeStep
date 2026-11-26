@@ -28,7 +28,8 @@ import {
   LogOut,
   Download,
   FileText,
-  Upload
+  Upload,
+  HardDrive
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -47,6 +48,7 @@ import {
 } from "../utils/scenarioFileParser";
 import Npc3DCharacter from "./Npc3DCharacter";
 import PWAInstallButton from "./PWAInstallButton";
+import GoogleDrivePanel from "./GoogleDrivePanel";
 import {
   isStandaloneHtmlMode,
   observeAuthState,
@@ -79,7 +81,7 @@ export default function TeacherDashboard({
   onResetScenariosDefault,
   onClose
 }: TeacherDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'analytics' | 'scenarios' | 'student-logs'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'scenarios' | 'student-logs' | 'google-drive'>('analytics');
   const [studentLogs, setStudentLogs] = useState<StudentLog[]>([]);
   const [editingScenario, setEditingScenario] = useState<Scenario | null>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
@@ -556,6 +558,20 @@ export default function TeacherDashboard({
           <BookOpen className="w-4 h-4 text-purple-500" />
           Kustomisasi Soal Misi
         </button>
+
+        {!isStandaloneHtmlMode && (
+          <button
+            onClick={() => { setActiveTab('google-drive'); setEditingScenario(null); }}
+            className={`px-5 py-3.5 rounded-xl font-black text-xs sm:text-sm shrink-0 select-none cursor-pointer flex items-center gap-2 focus:outline-none transition-all ${
+              activeTab === 'google-drive' 
+                ? "bg-sky-50 border-2 border-sky-600 text-sky-800 shadow-sm" 
+                : "border-2 border-transparent text-slate-500 hover:text-sky-600 hover:bg-slate-50"
+            }`}
+          >
+            <HardDrive className="w-4 h-4 text-sky-500" />
+            Google Drive
+          </button>
+        )}
       </div>
 
       {/* Main Container Viewport */}
@@ -1394,6 +1410,18 @@ export default function TeacherDashboard({
             </div>
 
           </div>
+        )}
+
+        {/* --- TAB 4: GOOGLE DRIVE BACKUP & RESTORE --- */}
+        {activeTab === 'google-drive' && (
+          <GoogleDrivePanel
+            scenarios={scenarios}
+            studentLogs={studentLogs}
+            onApplyImportedScenarios={async (imported) => {
+              await onSaveModifiedScenarios(imported);
+            }}
+            onNotify={showDownloadToast}
+          />
         )}
 
       </div>

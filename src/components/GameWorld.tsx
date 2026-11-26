@@ -730,6 +730,7 @@ export default function GameWorld({
         );
         void playNpcVoice({
           npcId: npc.id,
+          scenarioId: matchedScenario?.id,
           mode: "callout",
           text: spokenCallout,
           onSpeakingChange: (speaking) => {

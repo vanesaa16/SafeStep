@@ -1204,7 +1204,13 @@ async function startServer() {
 
   // API Route: Lightweight backend capability check (used to disable /api calls cleanly on static hosts like Netlify)
   app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, hasBackend: true, storage: "sqlite" });
+    res.json({
+      ok: true,
+      hasBackend: true,
+      storage: "sqlite",
+      hasGeminiTts: Boolean(getGeminiClient()),
+      cachedVoicesCount: npcVoiceAudioCache.size,
+    });
   });
 
   const escapeJsonForInlineScript = (value: unknown): string =>

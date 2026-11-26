@@ -41,20 +41,30 @@ export const isStandaloneHtmlMode =
 const app = initializeApp(firebaseConfig);
 
 function createFirestoreDb() {
+  const databaseId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
   try {
     return initializeFirestore(
       app,
       { experimentalForceLongPolling: true },
-      firebaseConfig.firestoreDatabaseId
+      databaseId
     );
   } catch {
-    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    return databaseId ? getFirestore(app, databaseId) : getFirestore(app);
   }
 }
 
 export const db = createFirestoreDb();
 export const auth = isStandaloneHtmlMode ? (null as unknown as ReturnType<typeof getAuth>) : getAuth(app);
+export const SCOPES = ["https://www.googleapis.com/auth/drive.file"] as const;
+
 const googleProvider = new GoogleAuthProvider();
+for (const scope of SCOPES) {
+  googleProvider.addScope(scope);
+}
+
+// In-memory OAuth access token cache only (never stored in localStorage/sessionStorage)
+let cachedAccessToken: string | null = null;
+let isSigningInFlow = false;
 
 export enum OperationType {
   CREATE = "create",
@@ -174,21 +184,64 @@ export async function signInTeacherWithGoogle(): Promise<User> {
   if (isStandaloneHtmlMode || !auth) {
     throw new Error("Mode file HTML mandiri menyimpan data secara lokal di perangkat.");
   }
-  const result = await signInWithPopup(auth, googleProvider);
-  return result.user;
+  isSigningInFlow = true;
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      cachedAccessToken = credential.accessToken;
+    }
+    return result.user;
+  } finally {
+    isSigningInFlow = false;
+  }
+}
+
+export async function connectGoogleDriveWithPopup(): Promise<{ user: User; accessToken: string }> {
+  if (isStandaloneHtmlMode || !auth) {
+    throw new Error("Google Drive membutuhkan koneksi online (bukan mode file HTML lokal).");
+  }
+  isSigningInFlow = true;
+  try {
+    googleProvider.setCustomParameters({ prompt: "consent" });
+    const result = await signInWithPopup(auth, googleProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (!credential?.accessToken) {
+      throw new Error("Gagal memperoleh token akses Google Drive.");
+    }
+    cachedAccessToken = credential.accessToken;
+    return { user: result.user, accessToken: cachedAccessToken };
+  } finally {
+    isSigningInFlow = false;
+  }
+}
+
+export function getGoogleDriveAccessToken(): string | null {
+  return cachedAccessToken;
+}
+
+export function clearGoogleDriveAccessToken(): void {
+  cachedAccessToken = null;
 }
 
 export async function signOutTeacher(): Promise<void> {
+  cachedAccessToken = null;
   if (isStandaloneHtmlMode || !auth) return;
   await signOut(auth);
 }
 
 export function observeAuthState(callback: (user: User | null) => void): Unsubscribe {
   if (isStandaloneHtmlMode || !auth) {
+    cachedAccessToken = null;
     queueMicrotask(() => callback(null));
     return () => {};
   }
-  return onAuthStateChanged(auth, callback);
+  return onAuthStateChanged(auth, (user) => {
+    if (!user && !isSigningInFlow) {
+      cachedAccessToken = null;
+    }
+    callback(user);
+  });
 }
 
 // ================= PUBLISHED CUSTOM SCENARIOS (/custom_scenarios/published_config) =================

@@ -12,6 +12,7 @@ import {
 } from "./soundEffects";
 import {
   playVoice,
+  preloadAudio,
   registerExternalVoiceStopper,
   stopLocalVoiceAudio,
 } from "./audioManager";
@@ -22,6 +23,8 @@ import {
   checkApiBackendAvailable,
   hasVoiceServerOrigin,
   isBackendKnownUnavailable,
+  isServerGeminiTtsAvailable,
+  markServerGeminiTtsUnavailable,
   resetBackendAvailabilityCache,
   resolveApiUrl,
 } from "./serverSync";
@@ -639,8 +642,17 @@ class VoiceAudioBufferPool {
     const currentEpoch = ++this.mapEpoch;
     warmUpVoiceGraph();
 
-    if (isOfflineOrStandaloneEnvironment()) {
-      return;
+    // Always pre-decode bundled offline MP3s for this map's NPCs & teachers into Web Audio RAM
+    // so playback inside published cross-origin iframes or offline mode has 0ms latency.
+    for (const sc of options.scenarios) {
+      if (sc.mapId !== options.mapId) continue;
+      const npcUrl = getOfflineNpcDialogAudioUrl(sc.npcId, sc.id);
+      if (npcUrl) preloadAudio(npcUrl);
+      const teacher = getTeacherPersonaForScenario(sc.id);
+      const correctUrl = getOfflineTeacherAudioUrl(teacher.teacherId, true);
+      const retryUrl = getOfflineTeacherAudioUrl(teacher.teacherId, false);
+      if (correctUrl) preloadAudio(correctUrl);
+      if (retryUrl) preloadAudio(retryUrl);
     }
 
     const playerName = (options.playerName || "Ananda").trim() || "Ananda";
@@ -766,6 +778,12 @@ class VoiceAudioBufferPool {
     }
 
     if (currentEpoch !== this.mapEpoch) return;
+
+    // If the server has no Gemini API key (e.g. published app without live TTS secret),
+    // skip spawning uncached synthesis requests and rely on cached WAVs + Web Audio offline MP3s.
+    if (isServerGeminiTtsAvailable() === false) {
+      return;
+    }
 
     // Step 2: Queue any remaining uncached map lines for sequential background synthesis & AudioBuffer decoding
     this.preloadQueue = [];
@@ -969,7 +987,11 @@ function getOrStartVoiceStream(
             notify({ type: "chunk", chunk: decodedWav });
           }
         } else if (msg.type === "fallback") {
-          if (typeof msg.retryAfterMs === "number" && msg.retryAfterMs > 0) {
+          const reason = (msg as { reason?: string }).reason;
+          if (reason === "missing_api_key") {
+            markServerGeminiTtsUnavailable();
+            clientRateLimitedUntil = Date.now() + 120_000;
+          } else if (typeof msg.retryAfterMs === "number" && msg.retryAfterMs > 0) {
             clientRateLimitedUntil = Date.now() + msg.retryAfterMs;
           } else {
             clientRateLimitedUntil = Date.now() + 12_000;
@@ -1051,6 +1073,17 @@ export function preloadMapVoiceBufferPool(options: MapVoiceBufferPoolOptions): v
   void voiceBufferPool.preloadMapAssets(options);
 }
 
+function hydratePayloadsFromIdbInBackground(items: VoiceRequestPayload[]): void {
+  for (const item of items) {
+    const cleanText = item.text.trim();
+    if (!cleanText) continue;
+    const key = buildVoiceCacheKey({ ...item, text: cleanText });
+    if (!voiceBufferPool.has(key)) {
+      void voiceBufferPool.hydrateFromIndexedDb(key);
+    }
+  }
+}
+
 /**
  * Promotes up to `maxCount` NPC voice lines to the front of the `voiceBufferPool` preload queue.
  */
@@ -1059,7 +1092,6 @@ export function preloadNpcVoices(
   maxCount = 2
 ): void {
   if (typeof window === "undefined" || items.length === 0) return;
-  if (isOfflineOrStandaloneEnvironment() || Date.now() < clientRateLimitedUntil) return;
 
   const payloads: VoiceRequestPayload[] = items.slice(0, maxCount).map((item) => ({
     role: "npc",
@@ -1067,6 +1099,16 @@ export function preloadNpcVoices(
     mode: item.mode,
     text: item.text,
   }));
+  hydratePayloadsFromIdbInBackground(payloads);
+
+  if (
+    isOfflineOrStandaloneEnvironment() ||
+    isServerGeminiTtsAvailable() === false ||
+    Date.now() < clientRateLimitedUntil
+  ) {
+    return;
+  }
+
   voiceBufferPool.promoteOrEnqueue(payloads, true);
 }
 
@@ -1079,7 +1121,6 @@ export function preloadTeacherFeedbackVoices(
   maxCount = 3
 ): void {
   if (typeof window === "undefined" || items.length === 0) return;
-  if (isOfflineOrStandaloneEnvironment() || Date.now() < clientRateLimitedUntil) return;
 
   const teacher = getTeacherPersonaForScenario(scenarioId);
   const payloads: VoiceRequestPayload[] = items.slice(0, maxCount).map((item) => ({
@@ -1088,6 +1129,16 @@ export function preloadTeacherFeedbackVoices(
     isCorrect: item.isCorrect,
     text: item.text,
   }));
+  hydratePayloadsFromIdbInBackground(payloads);
+
+  if (
+    isOfflineOrStandaloneEnvironment() ||
+    isServerGeminiTtsAvailable() === false ||
+    Date.now() < clientRateLimitedUntil
+  ) {
+    return;
+  }
+
   voiceBufferPool.promoteOrEnqueue(payloads, true);
 }
 
@@ -1100,7 +1151,6 @@ export function preloadOptionVoices(
   maxCount = 3
 ): void {
   if (typeof window === "undefined" || items.length === 0) return;
-  if (isOfflineOrStandaloneEnvironment() || Date.now() < clientRateLimitedUntil) return;
 
   const teacher = getTeacherPersonaForScenario(scenarioId);
   const payloads: VoiceRequestPayload[] = items.slice(0, maxCount).map((item) => ({
@@ -1108,16 +1158,33 @@ export function preloadOptionVoices(
     teacherId: teacher.teacherId,
     text: item.text,
   }));
+  hydratePayloadsFromIdbInBackground(payloads);
+
+  if (
+    isOfflineOrStandaloneEnvironment() ||
+    isServerGeminiTtsAvailable() === false ||
+    Date.now() < clientRateLimitedUntil
+  ) {
+    return;
+  }
+
   voiceBufferPool.promoteOrEnqueue(payloads, false);
 }
 
 let activeSpeechFallbackToken = 0;
+let activeSpeechWatchdogId: number | null = null;
 
 function cancelBrowserSpeechFallback(): void {
   activeSpeechFallbackToken += 1;
+  if (activeSpeechWatchdogId !== null && typeof window !== "undefined") {
+    window.clearTimeout(activeSpeechWatchdogId);
+    activeSpeechWatchdogId = null;
+  }
   if (typeof window !== "undefined" && "speechSynthesis" in window) {
     try {
-      window.speechSynthesis.cancel();
+      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        window.speechSynthesis.cancel();
+      }
     } catch {
       // Ignore synthesis cancel errors
     }
@@ -1127,7 +1194,8 @@ function cancelBrowserSpeechFallback(): void {
 function playBrowserSpeechOptionFallback(
   text: string,
   keepMusicDuckedOnEnd: boolean,
-  onSpeakingChange?: (speaking: boolean) => void
+  onSpeakingChange?: (speaking: boolean) => void,
+  onErrorFallback?: () => void
 ): void {
   if (
     typeof window === "undefined" ||
@@ -1136,6 +1204,7 @@ function playBrowserSpeechOptionFallback(
   ) {
     onSpeakingChange?.(false);
     if (!keepMusicDuckedOnEnd) setMusicDucked(false);
+    onErrorFallback?.();
     return;
   }
 
@@ -1146,14 +1215,22 @@ function playBrowserSpeechOptionFallback(
   }
 
   try {
-    window.speechSynthesis.cancel();
+    const synth = window.speechSynthesis;
+    const neededCancel = synth.speaking || synth.pending;
+    if (neededCancel) {
+      synth.cancel();
+    }
+    if (synth.paused) {
+      synth.resume();
+    }
+
     const speechToken = ++activeSpeechFallbackToken;
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.lang = "id-ID";
     utterance.rate = 0.94;
     utterance.pitch = 1.03;
 
-    const voices = window.speechSynthesis.getVoices();
+    const voices = synth.getVoices();
     const idVoice =
       voices.find((v) => v.lang.toLowerCase().startsWith("id")) ||
       voices.find((v) => v.lang.toLowerCase().includes("id"));
@@ -1164,20 +1241,47 @@ function playBrowserSpeechOptionFallback(
     setMusicDucked(true);
     onSpeakingChange?.(true);
 
-    const finish = () => {
+    const finish = (hadError = false) => {
+      if (activeSpeechWatchdogId !== null) {
+        window.clearTimeout(activeSpeechWatchdogId);
+        activeSpeechWatchdogId = null;
+      }
       if (speechToken !== activeSpeechFallbackToken) return;
       onSpeakingChange?.(false);
       if (!keepMusicDuckedOnEnd) {
         setMusicDucked(false);
       }
+      if (hadError) {
+        onErrorFallback?.();
+      }
     };
 
-    utterance.onend = finish;
-    utterance.onerror = finish;
-    window.speechSynthesis.speak(utterance);
+    utterance.onend = () => finish(false);
+    utterance.onerror = () => finish(true);
+    activeSpeechWatchdogId = window.setTimeout(
+      () => finish(false),
+      Math.max(4500, cleanText.length * 140)
+    );
+
+    const doSpeak = () => {
+      if (speechToken !== activeSpeechFallbackToken) return;
+      try {
+        if (synth.paused) synth.resume();
+        synth.speak(utterance);
+      } catch {
+        finish(true);
+      }
+    };
+
+    if (neededCancel) {
+      window.setTimeout(doSpeak, 45);
+    } else {
+      doSpeak();
+    }
   } catch {
     onSpeakingChange?.(false);
     if (!keepMusicDuckedOnEnd) setMusicDucked(false);
+    onErrorFallback?.();
   }
 }
 
@@ -1354,8 +1458,24 @@ async function playVoicePayload(
   const pooledSource = voiceBufferPool.acquireSource(cacheKey, ctx, voiceGain);
   if (pooledSource) {
     try {
+      if (ctx.state === "suspended") {
+        await Promise.race([
+          ctx.resume().catch(() => {}),
+          new Promise<void>((r) => window.setTimeout(r, 150)),
+        ]);
+        if (myToken !== currentVoiceToken) return;
+      }
+      const durationMs = pooledSource.buffer
+        ? Math.max(2500, Math.ceil(pooledSource.buffer.duration * 1000) + 1200)
+        : 10000;
+      const safetyTimer = window.setTimeout(() => {
+        activeScheduledSources.delete(pooledSource);
+        finishVoiceSession();
+      }, durationMs);
+
       activeScheduledSources.add(pooledSource);
       pooledSource.onended = () => {
+        window.clearTimeout(safetyTimer);
         activeScheduledSources.delete(pooledSource);
         finishVoiceSession();
       };
@@ -1370,6 +1490,21 @@ async function playVoicePayload(
     }
   }
 
+  // If this is a synchronous button click to read an option and live TTS is unavailable,
+  // fire fallback synchronously BEFORE any await so iframe user-gesture activation stays intact.
+  const noLiveTtsAvailable =
+    isOfflineOrStandaloneEnvironment() ||
+    isServerGeminiTtsAvailable() === false ||
+    Date.now() < clientRateLimitedUntil;
+
+  if (normalizedPayload.role === "option" && noLiveTtsAvailable) {
+    finishVoiceSession();
+    if (myToken === currentVoiceToken) {
+      onFallback();
+    }
+    return;
+  }
+
   // Path A2: Restore previously generated Gemini teacher/NPC voice from persistent IndexedDB cache (works offline!)
   const restoredFromIdb = await voiceBufferPool.hydrateFromIndexedDb(cacheKey);
   if (myToken !== currentVoiceToken) return;
@@ -1377,8 +1512,24 @@ async function playVoicePayload(
     const idbSource = voiceBufferPool.acquireSource(cacheKey, ctx, voiceGain);
     if (idbSource) {
       try {
+        if (ctx.state === "suspended") {
+          await Promise.race([
+            ctx.resume().catch(() => {}),
+            new Promise<void>((r) => window.setTimeout(r, 150)),
+          ]);
+          if (myToken !== currentVoiceToken) return;
+        }
+        const durationMs = idbSource.buffer
+          ? Math.max(2500, Math.ceil(idbSource.buffer.duration * 1000) + 1200)
+          : 10000;
+        const safetyTimer = window.setTimeout(() => {
+          activeScheduledSources.delete(idbSource);
+          finishVoiceSession();
+        }, durationMs);
+
         activeScheduledSources.add(idbSource);
         idbSource.onended = () => {
+          window.clearTimeout(safetyTimer);
           activeScheduledSources.delete(idbSource);
           finishVoiceSession();
         };
@@ -1394,8 +1545,8 @@ async function playVoicePayload(
     }
   }
 
-  // Path B: Immediate offline fallback when offline/standalone or rate-limited; otherwise stream real-time PCM
-  if (isOfflineOrStandaloneEnvironment() || Date.now() < clientRateLimitedUntil) {
+  // Path B: Immediate offline fallback when offline/standalone, missing server API key, or rate-limited; otherwise stream real-time PCM
+  if (noLiveTtsAvailable) {
     finishVoiceSession();
     if (myToken === currentVoiceToken) {
       onFallback();
@@ -1592,13 +1743,17 @@ export async function playNpcVoice({
         }
         // Custom scenario text offline/standalone: read the teacher's custom question aloud cleanly
         if (!useDefaultMp3) {
-          playBrowserSpeechOptionFallback(text, keepMusicDuckedOnEnd, onSpeakingChange);
+          playBrowserSpeechOptionFallback(text, keepMusicDuckedOnEnd, onSpeakingChange, () =>
+            playFallbackBapakVocalFormant(initialDelaySec)
+          );
           return;
         }
       }
       if (mode === "callout") {
         // Offline callout: speak Indonesian callout cleanly with AI speech until online Gemini voice is cached
-        playBrowserSpeechOptionFallback(text, keepMusicDuckedOnEnd, onSpeakingChange);
+        playBrowserSpeechOptionFallback(text, keepMusicDuckedOnEnd, onSpeakingChange, () =>
+          playFallbackBapakVocalFormant(initialDelaySec)
+        );
         return;
       }
       playFallbackBapakVocalFormant(initialDelaySec);
