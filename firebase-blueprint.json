@@ -1,0 +1,150 @@
+{
+  "entities": {
+    "connection_ping": {
+      "title": "Connection Ping",
+      "description": "Read-only document used by client boot health check",
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "Health indicator flag"
+        }
+      }
+    },
+    "admin_role": {
+      "title": "Admin Role",
+      "description": "Trusted teacher/admin UID marker document",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the administrator"
+        }
+      },
+      "required": ["uid"]
+    },
+    "scenario_bundle": {
+      "title": "Scenario Bundle",
+      "description": "Published classroom safety scenarios configured by the teacher",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Canonical bundle identifier (published_config)"
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the teacher/admin who saved the scenarios"
+        },
+        "scenarios": {
+          "type": "array",
+          "description": "Bounded list of up to 30 game scenarios"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-modified timestamp"
+        }
+      },
+      "required": ["id", "authorUid", "scenarios", "createdAt", "updatedAt"]
+    },
+    "student_log": {
+      "title": "Student Log",
+      "description": "Student gameplay progress and quiz score log",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Sanitized student log identifier"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Authenticated teacher/user UID owning the synced record"
+        },
+        "studentName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Student first name or classroom nickname (non-PII)"
+        },
+        "totalPoints": {
+          "type": "number",
+          "description": "Total safety points earned (0 to 1000)"
+        },
+        "completedScenariosCount": {
+          "type": "number",
+          "description": "Count of completed scenarios (0 to 30)"
+        },
+        "completedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "ISO timestamp string of completion"
+        },
+        "history": {
+          "type": "array",
+          "description": "Bounded list of up to 50 answered scenario history items"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-modified timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "studentName",
+        "totalPoints",
+        "completedScenariosCount",
+        "completedAt",
+        "history",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/test/{docId}": {
+      "schema": "connection_ping",
+      "description": "Read-only client boot connectivity check document"
+    },
+    "/admins/{adminUid}": {
+      "schema": "admin_role",
+      "description": "Trusted administrator UID lookup collection"
+    },
+    "/custom_scenarios/{configId}": {
+      "schema": "scenario_bundle",
+      "description": "Published custom scenarios document read by students and managed by admins"
+    },
+    "/student_logs/{logId}": {
+      "schema": "student_log",
+      "description": "Synced student score logs scoped to verified teacher/owner UID"
+    }
+  }
+}

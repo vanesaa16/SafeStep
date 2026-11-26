@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SafeStep - Petualangan Keselamatan Anak SD</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    body { min-height: 100vh; background: linear-gradient(180deg, #A1DDFE 0%, #E2F5FE 55%, #BCE395 100%); color: #1E293B; display: flex; align-items: center; justify-content: center; padding: 14px; }
+    .card { width: 100%; max-width: 720px; background: rgba(255,253,247,0.96); border: 2px solid #FFF; border-radius: 24px; box-shadow: 0 16px 40px rgba(30,41,59,0.14); padding: 22px; position: relative; overflow: hidden; }
+    .brand { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #E2E8F0; padding-bottom: 12px; margin-bottom: 16px; }
+    .brand h1 { color: #DC2626; font-size: 1.55rem; font-weight: 800; line-height: 1.1; }
+    .brand p { color: #4D7C0F; font-size: 0.82rem; font-weight: 700; margin-top: 2px; }
+    .meta { font-size: 0.8rem; color: #475569; font-weight: 600; }
+    .hidden { display: none !important; }
+    input, select { width: 100%; padding: 11px 14px; border: 2px solid #CBD5E1; border-radius: 12px; font-size: 0.95rem; font-weight: 600; outline: none; margin-bottom: 12px; }
+    input:focus { border-color: #DC2626; }
+    .chars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+    .char-btn { background: #FFF; border: 2px solid #E2E8F0; border-radius: 14px; padding: 10px 6px; cursor: pointer; text-align: center; transition: 0.15s; }
+    .char-btn.active { background: #FFFBEB; border-color: #F59E0B; box-shadow: 0 4px 12px rgba(245,158,11,0.18); }
+    .btn { border: none; border-radius: 12px; padding: 11px 18px; font-weight: 800; font-size: 0.92rem; cursor: pointer; transition: 0.15s; }
+    .btn-primary { width: 100%; background: #DC2626; color: #FFF; box-shadow: 0 4px 0 #991B1B; }
+    .btn-primary:hover { background: #EF4444; }
+    .btn-outline { background: #F1F5F9; color: #334155; font-size: 0.8rem; padding: 8px 12px; }
+    .hud { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 0.85rem; font-weight: 700; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .tab { padding: 6px 12px; border-radius: 10px; border: 1px solid #CBD5E1; background: #FFF; font-size: 0.78rem; font-weight: 700; cursor: pointer; }
+    .tab.active { background: #1E293B; color: #FFF; border-color: #1E293B; }
+    /* Peta Halaman Sekolah & Area */
+    .yard { position: relative; width: 100%; height: 300px; border-radius: 18px; overflow: hidden; border: 2px solid #86EFAC; background: linear-gradient(180deg, #BAE6FD 0%, #DCFCE7 36%, #86C85A 36%, #6EA843 100%); user-select: none; }
+    .path { position: absolute; left: 42%; top: 36%; width: 16%; height: 64%; background: #E7E5E4; border-left: 3px solid #D6D3D1; border-right: 3px solid #D6D3D1; }
+    .school-bldg { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); width: 180px; height: 78px; background: #FEF3C7; border: 2px solid #D97706; border-radius: 8px; text-align: center; padding-top: 22px; font-size: 0.72rem; font-weight: 800; color: #92400E; box-shadow: 0 6px 12px rgba(0,0,0,0.12); }
+    .school-roof { position: absolute; top: -16px; left: -8px; right: -8px; height: 22px; background: #DC2626; clip-path: polygon(6% 0%, 94% 0%, 100% 100%, 0% 100%); }
+    .tree { position: absolute; width: 58px; height: 78px; filter: drop-shadow(0 6px 6px rgba(0,0,0,0.18)); pointer-events: none; }
+    .flowers { position: absolute; font-size: 14px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.12)); pointer-events: none; }
+    .player, .npc { position: absolute; transform: translate(-50%, -50%); transition: left 0.14s, top 0.14s; text-align: center; }
+    .npc { cursor: pointer; }
+    .excl { display: inline-block; background: #EF4444; color: #FFF; font-weight: 900; font-size: 0.72rem; padding: 1px 7px; border-radius: 99px; margin-bottom: 2px; animation: bounce 1s infinite alternate; }
+    .npc.done .excl { background: #16A34A; animation: none; }
+    @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-4px); } }
+    .dpad { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+    .dpad button { width: 42px; height: 38px; border-radius: 10px; border: 1px solid #CBD5E1; background: #FFF; font-weight: 800; cursor: pointer; }
+    .modal { position: fixed; inset: 0; background: rgba(15,23,42,0.55); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 30; }
+    .modal-box { background: #FFF; max-width: 480px; width: 100%; border-radius: 20px; padding: 20px; box-shadow: 0 20px 45px rgba(0,0,0,0.25); }
+    .opt-btn { width: 100%; text-align: left; padding: 10px 12px; margin-top: 8px; border: 2px solid #E2E8F0; border-radius: 12px; background: #F8FAFC; font-size: 0.86rem; font-weight: 600; cursor: pointer; }
+    .opt-btn:hover { border-color: #3B82F6; background: #EFF6FF; }
+    .badge-toast { background: linear-gradient(135deg, #FEF3C7, #FDE68A); border: 2px solid #F59E0B; border-radius: 14px; padding: 10px 14px; margin-bottom: 10px; font-size: 0.83rem; font-weight: 700; color: #92400E; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.82rem; }
+    th, td { border-bottom: 1px solid #E2E8F0; padding: 8px 6px; text-align: left; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <div>
+        <h1>SafeStep</h1>
+        <p>Petualangan Keselamatan Anak SD</p>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-outline" onclick="openTeacher()">Evaluasi Guru</button>
+        <button id="homeBtn" class="btn btn-outline hidden" onclick="goHome()">Menu Awal</button>
+      </div>
+    </div>
+
+    <!-- LAYAR AWAL -->
+    <div id="screenHome">
+      <p class="meta" style="margin-bottom:12px;">4 Lokasi Petualangan · Sistem Badge Prestasi · Seragam SD Merah Putih</p>
+      <input id="studentName" type="text" maxlength="24" placeholder="Tulis nama panggilan atau lengkapmu..." />
+      <p style="font-size:0.8rem;font-weight:700;margin-bottom:8px;">Pilih Karakter Siswa SD (Seragam Merah Putih):</p>
+      <div class="chars" id="charGrid"></div>
+      <button class="btn btn-primary" onclick="startGame()">Mulai Petualangan</button>
+    </div>
+
+    <!-- LAYAR PERMAINAN -->
+    <div id="screenGame" class="hidden">
+      <div id="badgeBanner" class="badge-toast hidden"></div>
+      <div class="hud">
+        <span id="hudPlayer">Siswa</span>
+        <span>Skor: <strong id="hudScore" style="color:#DC2626;">0</strong> / 100 Poin</span>
+        <span>Badge: <strong id="hudBadge" style="color:#D97706;">Belum Ada</strong></span>
+      </div>
+      <div class="tabs" id="mapTabs"></div>
+      <div class="yard" id="gameYard" onclick="moveByClick(event)">
+        <div class="path"></div>
+        <div class="school-bldg"><div class="school-roof"></div><span id="bldgLabel">SDN SAFESTEP</span></div>
+        <!-- Pohon Realistis Bergradien & Bunga Taman -->
+        <svg class="tree" style="left:18px;top:72px;" viewBox="0 0 60 80">
+          <defs><radialGradient id="gLeaf" cx="35%" cy="30%" r="65%"><stop offset="0%" stop-color="#BEF264"/><stop offset="55%" stop-color="#4D7C0F"/><stop offset="100%" stop-color="#365314"/></radialGradient></defs>
+          <ellipse cx="30" cy="74" rx="18" ry="4" fill="rgba(0,0,0,0.18)"/>
+          <rect x="26" y="45" width="8" height="28" rx="3" fill="#78350F"/>
+          <circle cx="20" cy="36" r="14" fill="url(#gLeaf)"/><circle cx="40" cy="36" r="14" fill="url(#gLeaf)"/><circle cx="30" cy="22" r="16" fill="url(#gLeaf)"/>
+        </svg>
+        <svg class="tree" style="right:18px;top:76px;" viewBox="0 0 60 80">
+          <ellipse cx="30" cy="74" rx="18" ry="4" fill="rgba(0,0,0,0.18)"/>
+          <rect x="26" y="45" width="8" height="28" rx="3" fill="#78350F"/>
+          <circle cx="20" cy="36" r="14" fill="url(#gLeaf)"/><circle cx="40" cy="36" r="14" fill="url(#gLeaf)"/><circle cx="30" cy="22" r="16" fill="url(#gLeaf)"/>
+        </svg>
+        <div class="flowers" style="left:22px;bottom:14px;">🌸 🌻 🌷 🌺</div>
+        <div class="flowers" style="right:22px;bottom:14px;">🌷 🌼 🌸 🌻</div>
+        <div id="npcContainer"></div>
+        <div id="playerEl" class="player" style="left:50%;top:82%;"></div>
+      </div>
+      <div class="dpad">
+        <button onclick="step(0,-8)">▲</button>
+        <button onclick="step(-8,0)">◀</button>
+        <button onclick="step(8,0)">▶</button>
+        <button onclick="step(0,8)">▼</button>
+        <button style="width:auto;padding:0 12px;" onclick="window.print()">Cetak Rapor</button>
+      </div>
+    </div>
+
+    <!-- LAYAR REKAP GURU -->
+    <div id="screenTeacher" class="hidden">
+      <h3 style="margin-bottom:6px;">Rekap Evaluasi Siswa (Data Lokal Browser)</h3>
+      <table><thead><tr><th>Nama Anak</th><th>Skor</th><th>Misi Selesai</th><th>Badge Tertinggi</th></tr></thead><tbody id="teacherRows"></tbody></table>
+    </div>
+  </div>
+
+  <!-- MODAL SKENARIO -->
+  <div id="quizModal" class="modal hidden">
+    <div class="modal-box">
+      <p id="qCategory" style="font-size:0.75rem;font-weight:800;color:#DC2626;margin-bottom:4px;"></p>
+      <h3 id="qNpc" style="margin-bottom:8px;"></h3>
+      <p id="qStory" style="font-size:0.9rem;line-height:1.45;margin-bottom:10px;color:#334155;"></p>
+      <div id="qOptions"></div>
+      <div id="qFeedback" class="hidden" style="margin-top:12px;padding:10px;border-radius:12px;font-size:0.85rem;font-weight:600;"></div>
+      <button id="qCloseBtn" class="btn btn-primary hidden" style="margin-top:12px;" onclick="closeQuiz()">Lanjutkan Petualangan</button>
+    </div>
+  </div>
+
+  <script>
+    const AVATARS = [
+      { id: "putra", label: "Siswa Putra", svg: "👦🏻" },
+      { id: "putri", label: "Siswa Putri", svg: "👧🏻" },
+      { id: "berhijab", label: "Siswa Berhijab", svg: "🧕🏻" }
+    ];
+    const BADGES = [
+      { pts: 25, name: "🥉 Langkah Awal Waspada" },
+      { pts: 50, name: "🥈 Sahabat Cerdas Sekolah" },
+      { pts: 75, name: "💎 Penjaga Diri Tangguh" },
+      { pts: 100, name: "👑 Pahlawan Cilik SafeStep" }
+    ];
+    const SCENARIOS = [
+      { id: "m1", map: "Halaman Sekolah", bldg: "SDN SAFESTEP", x: 24, y: 58, npc: "Orang Asing di Gerbang", icon: "🕵️", cat: "Waspada Orang Asing",
+        story: "Seseorang tak dikenal berkata: 'Hei [Nama], ayahmu minta aku jemput kamu sekarang. Jangan bilang guru ya!'",
+        opts: [
+          { t: "Menolak tegas, masuk ke sekolah, dan melapor ke guru/satpam", ok: true, fb: "Hebat [Nama]! Kata 'jangan bilang siapa-siapa' adalah tanda bahaya. Selalu konfirmasi ke guru." },
+          { t: "Langsung ikut karena dia tahu namaku", ok: false, fb: "Waspada! Nama bisa terlihat dari atribut sekolah. Jangan pernah ikut orang asing." }
+        ]
+      },
+      { id: "m2", map: "Ruang Kelas", bldg: "RUANG KELAS SD", x: 74, y: 56, npc: "Teman Usil", icon: "🧒", cat: "Batasan Tubuh Privat",
+        story: "Saat istirahat, ada teman menyentuh area tubuh privatmu sambil berkata: 'Cuma bercanda kok, [Nama]!'",
+        opts: [
+          { t: "Berkata tegas 'Jangan sentuh tubuhku!' lalu lapor ke guru kelas", ok: true, fb: "Berani sekali [Nama]! Tubuhmu adalah hakmu sepenuhnya dan bukan bahan bercandaan." },
+          { t: "Diam saja karena takut dijauhi teman", ok: false, fb: "Jangan diam ya! Segera tegur dengan tegas dan laporkan kepada guru atau orang tua." }
+        ]
+      },
+      { id: "m3", map: "Jalan Pulang", bldg: "JALAN RAYA", x: 28, y: 64, npc: "Pengendara Menawari Permen", icon: "🚗", cat: "Keamanan Jalan Pulang",
+        story: "Mobil berhenti di dekatmu: 'Dek [Nama], mau hadiah mainan? Masuk yuk ke mobil sebentar!'",
+        opts: [
+          { t: "Menolak, mundur menjauh ke tempat ramai, dan tidak mendekati mobil", ok: true, fb: "Cerdas [Nama]! Orang dewasa baik tidak merayu anak kecil masuk ke mobil dengan hadiah." },
+          { t: "Mendekati pintu mobil untuk melihat mainannya", ok: false, fb: "Bahaya! Jaga jarak aman dari kendaraan orang asing dan segera cari tempat ramai." }
+        ]
+      },
+      { id: "m4", map: "Rumah", bldg: "RUMAH AMAN", x: 72, y: 62, npc: "Tamu Tak Dikenal", icon: "🚪", cat: "Keselamatan di Rumah",
+        story: "Saat [Nama] di rumah, seseorang mengetuk pintu mengaku kurir dan meminta pintu segera dibuka.",
+        opts: [
+          { t: "Tidak membuka pintu sembarangan dan panggil orang tua di rumah", ok: true, fb: "Tepat sekali [Nama]! Selalu pastikan orang tua yang memeriksa tamu tak dikenal." },
+          { t: "Langsung membukakan pintu sendirian", ok: false, fb: "Berbahaya! Jangan pernah membuka pintu untuk orang asing tanpa izin orang tua." }
+        ]
+      }
+    ];
+
+    let state = { name: "", avatar: AVATARS[0], map: "Halaman Sekolah", px: 50, py: 82, score: 0, done: {} };
+
+    function renderChars() {
+      document.getElementById("charGrid").innerHTML = AVATARS.map((a, i) => `
+        <button type="button" class="char-btn ${state.avatar.id===a.id?'active':''}" onclick="pickChar(${i})">
+          <div style="font-size:2rem;">${a.svg}</div>
+          <div style="font-size:0.72rem;font-weight:700;color:#DC2626;margin-top:4px;">Seragam SD</div>
+        </button>`).join("");
+    }
+    function pickChar(i) { state.avatar = AVATARS[i]; renderChars(); }
+
+    function startGame() {
+      const val = document.getElementById("studentName").value.trim();
+      if (!val) { document.getElementById("studentName").focus(); return; }
+      state = { ...state, name: val, score: 0, done: {}, px: 50, py: 82 };
+      document.getElementById("screenHome").classList.add("hidden");
+      document.getElementById("screenTeacher").classList.add("hidden");
+      document.getElementById("screenGame").classList.remove("hidden");
+      document.getElementById("homeBtn").classList.remove("hidden");
+      updateView();
+    }
+
+    function updateView() {
+      document.getElementById("hudPlayer").textContent = `${state.avatar.svg} ${state.name}`;
+      document.getElementById("hudScore").textContent = state.score;
+      const unlocked = BADGES.filter(b => state.score >= b.pts);
+      document.getElementById("hudBadge").textContent = unlocked.length ? unlocked[unlocked.length - 1].name : "Belum Ada";
+
+      const maps = ["Halaman Sekolah", "Ruang Kelas", "Jalan Pulang", "Rumah"];
+      document.getElementById("mapTabs").innerHTML = maps.map(m =>
+        `<button class="tab ${state.map===m?'active':''}" onclick="switchMap('${m}')">${m}</button>`
+      ).join("");
+
+      const cur = SCENARIOS.find(s => s.map === state.map);
+      document.getElementById("bldgLabel").textContent = cur ? cur.bldg : "SAFESTEP";
+      const p = document.getElementById("playerEl");
+      p.style.left = state.px + "%"; p.style.top = state.py + "%";
+      p.innerHTML = `<div style="font-size:1.8rem;">${state.avatar.svg}</div><div style="background:#DC2626;color:#FFF;font-size:0.68rem;font-weight:800;padding:1px 6px;border-radius:6px;">${state.name}</div>`;
+
+      document.getElementById("npcContainer").innerHTML = SCENARIOS.filter(s => s.map === state.map).map(s => `
+        <div class="npc ${state.done[s.id]?'done':''}" style="left:${s.x}%;top:${s.y}%;" onclick="event.stopPropagation();openQuiz('${s.id}')">
+          <div class="excl">${state.done[s.id] ? '✓ Selesai' : '! Misi'}</div>
+          <div style="font-size:1.75rem;">${s.icon}</div>
+        </div>`).join("");
+    }
+
+    function switchMap(m) { state.map = m; state.px = 50; state.py = 82; updateView(); }
+    function step(dx, dy) {
+      state.px = Math.max(10, Math.min(90, state.px + dx));
+      state.py = Math.max(42, Math.min(88, state.py + dy));
+      updateView();
+      SCENARIOS.filter(s => s.map === state.map && !state.done[s.id]).forEach(s => {
+        if (Math.hypot(state.px - s.x, state.py - s.y) < 12) openQuiz(s.id);
+      });
+    }
+    function moveByClick(e) {
+      const r = e.currentTarget.getBoundingClientRect();
+      state.px = Math.max(10, Math.min(90, ((e.clientX - r.left) / r.width) * 100));
+      state.py = Math.max(42, Math.min(88, ((e.clientY - r.top) / r.height) * 100));
+      updateView();
+    }
+
+    function openQuiz(id) {
+      const s = SCENARIOS.find(x => x.id === id);
+      if (!s) return;
+      document.getElementById("qCategory").textContent = s.cat;
+      document.getElementById("qNpc").textContent = s.npc;
+      document.getElementById("qStory").textContent = s.story.replaceAll("[Nama]", state.name);
+      document.getElementById("qFeedback").className = "hidden";
+      document.getElementById("qCloseBtn").classList.add("hidden");
+      document.getElementById("qOptions").innerHTML = s.opts.map((o, idx) =>
+        `<button class="opt-btn" onclick="answerQuiz('${s.id}',${idx})">${o.t}</button>`
+      ).join("");
+      document.getElementById("quizModal").classList.remove("hidden");
+    }
+
+    function answerQuiz(id, idx) {
+      const s = SCENARIOS.find(x => x.id === id);
+      const o = s.opts[idx];
+      const fb = document.getElementById("qFeedback");
+      fb.textContent = o.fb.replaceAll("[Nama]", state.name);
+      fb.className = "";
+      fb.style.background = o.ok ? "#DCFCE7" : "#FEE2E2";
+      fb.style.color = o.ok ? "#166534" : "#991B1B";
+      if (o.ok && !state.done[id]) {
+        const prev = state.score;
+        state.score += 25;
+        state.done[id] = true;
+        const newBadge = BADGES.find(b => prev < b.pts && state.score >= b.pts);
+        if (newBadge) {
+          const banner = document.getElementById("badgeBanner");
+          banner.textContent = `Selamat ${state.name}! Badge Prestasi Baru Terbuka: ${newBadge.name}`;
+          banner.classList.remove("hidden");
+        }
+        saveRecord();
+      }
+      document.getElementById("qCloseBtn").classList.remove("hidden");
+      updateView();
+    }
+
+    function closeQuiz() { document.getElementById("quizModal").classList.add("hidden"); }
+    function saveRecord() {
+      const list = JSON.parse(localStorage.getItem("safestep_logs") || "[]");
+      const unlocked = BADGES.filter(b => state.score >= b.pts);
+      const badge = unlocked.length ? unlocked[unlocked.length - 1].name : "-";
+      const item = { name: state.name, score: state.score, count: Object.keys(state.done).length, badge };
+      const idx = list.findIndex(x => x.name.toLowerCase() === state.name.toLowerCase());
+      if (idx >= 0) list[idx] = item; else list.push(item);
+      localStorage.setItem("safestep_logs", JSON.stringify(list));
+    }
+    function openTeacher() {
+      document.getElementById("screenHome").classList.add("hidden");
+      document.getElementById("screenGame").classList.add("hidden");
+      document.getElementById("screenTeacher").classList.remove("hidden");
+      document.getElementById("homeBtn").classList.remove("hidden");
+      const list = JSON.parse(localStorage.getItem("safestep_logs") || "[]");
+      document.getElementById("teacherRows").innerHTML = list.length
+        ? list.map(r => `<tr><td><strong>${r.name}</strong></td><td>${r.score}</td><td>${r.count}/4</td><td>${r.badge}</td></tr>`).join("")
+        : `<tr><td colspan="4">Belum ada data permainan siswa.</td></tr>`;
+    }
+    function goHome() {
+      document.getElementById("screenGame").classList.add("hidden");
+      document.getElementById("screenTeacher").classList.add("hidden");
+      document.getElementById("screenHome").classList.remove("hidden");
+      document.getElementById("homeBtn").classList.add("hidden");
+    }
+    window.addEventListener("keydown", e => {
+      if (document.getElementById("screenGame").classList.contains("hidden")) return;
+      if (e.key === "ArrowUp" || e.key === "w") step(0, -8);
+      if (e.key === "ArrowDown" || e.key === "s") step(0, 8);
+      if (e.key === "ArrowLeft" || e.key === "a") step(-8, 0);
+      if (e.key === "ArrowRight" || e.key === "d") step(8, 0);
+    });
+    renderChars();
+  </script>
+</body>
+</html>

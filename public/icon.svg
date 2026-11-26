@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E0F2FE" />
+      <stop offset="55%" stop-color="#BAE6FD" />
+      <stop offset="100%" stop-color="#7DD3FC" />
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="120" y1="68" x2="392" y2="452" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="52%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+    <linearGradient id="goldTrim" x1="104" y1="68" x2="408" y2="452" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FEF08A" />
+      <stop offset="50%" stop-color="#FACC15" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <path
+    d="M256 64L404 121V242C404 337 341 404 256 436C171 404 108 337 108 242V121L256 64Z"
+    fill="url(#shieldGrad)"
+    stroke="url(#goldTrim)"
+    stroke-width="22"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M142 142L256 98L370 142V184H142V142Z"
+    fill="#EF4444"
+    opacity="0.95"
+  />
+  <path
+    d="M196 272L239 315L326 220"
+    stroke="#FFFFFF"
+    stroke-width="32"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

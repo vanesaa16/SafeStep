@@ -1,0 +1,8 @@
+{
+  "name": "Safe Step versi 2",
+  "description": "Game edukasi interaktif keselamatan diri anak (SafeStep: Petualangan Keselamatan Diri) dengan simulasi eksplorasi peta, interaksi NPC, dan pertanyaan misi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

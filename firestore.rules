@@ -1,0 +1,198 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ================= PRIMITIVES & IDENTITY HELPERS =================
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'vnesa7880@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // ================= VALIDATION BLUEPRINTS =================
+    function isValidScenarioBundle(data) {
+      return data.keys().hasAll(['id', 'authorUid', 'scenarios', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'authorUid', 'scenarios', 'createdAt', 'updatedAt']) &&
+        data.id is string &&
+        data.id.size() >= 1 &&
+        data.id.size() <= 64 &&
+        data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.authorUid is string &&
+        data.authorUid.size() >= 1 &&
+        data.authorUid.size() <= 128 &&
+        data.authorUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.authorUid == request.auth.uid &&
+        data.scenarios is list &&
+        data.scenarios.size() >= 1 &&
+        data.scenarios.size() <= 30 &&
+        data.scenarios[0] is map &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStudentLog(data) {
+      return data.keys().hasAll([
+          'id',
+          'ownerUid',
+          'studentName',
+          'totalPoints',
+          'completedScenariosCount',
+          'completedAt',
+          'history',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'ownerUid',
+          'studentName',
+          'totalPoints',
+          'completedScenariosCount',
+          'completedAt',
+          'history',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.id is string &&
+        data.id.size() >= 1 &&
+        data.id.size() <= 128 &&
+        data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerUid is string &&
+        data.ownerUid.size() >= 1 &&
+        data.ownerUid.size() <= 128 &&
+        data.ownerUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerUid == request.auth.uid &&
+        data.studentName is string &&
+        data.studentName.size() >= 1 &&
+        data.studentName.size() <= 80 &&
+        data.totalPoints is number &&
+        data.totalPoints >= 0 &&
+        data.totalPoints <= 1000 &&
+        data.completedScenariosCount is number &&
+        data.completedScenariosCount >= 0 &&
+        data.completedScenariosCount <= 30 &&
+        data.completedAt is string &&
+        data.completedAt.size() >= 1 &&
+        data.completedAt.size() <= 64 &&
+        data.history is list &&
+        data.history.size() <= 50 &&
+        (data.history.size() == 0 || data.history[0] is map) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // ================= COLLECTION RULES =================
+
+    // 1. Client Boot Connectivity Probe (/test/connection)
+    match /test/{docId} {
+      allow get: if isValidId(docId) && docId == 'connection';
+      allow list, write: if false;
+    }
+
+    // 2. Trusted Administrator Registry (/admins/{adminUid})
+    match /admins/{adminUid} {
+      allow get: if isVerifiedUser() && isValidId(adminUid) && request.auth.uid == adminUid;
+      allow list, write: if false;
+    }
+
+    // 3. Published Classroom Scenarios (/custom_scenarios/published_config)
+    match /custom_scenarios/{configId} {
+      allow get: if isValidId(configId) && configId == 'published_config';
+      allow list: if false;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(configId) &&
+        configId == 'published_config' &&
+        isValidScenarioBundle(incoming()) &&
+        incoming().id == configId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+
+      allow update: if isVerifiedUser() &&
+        isValidId(configId) &&
+        configId == 'published_config' &&
+        isValidScenarioBundle(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['scenarios', 'authorUid', 'updatedAt']) &&
+        isAdmin();
+
+      allow delete: if isVerifiedUser() &&
+        isValidId(configId) &&
+        configId == 'published_config' &&
+        isAdmin();
+    }
+
+    // 4. Student Score Logs (/student_logs/{logId})
+    match /student_logs/{logId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(logId) &&
+        (existing().ownerUid == request.auth.uid || isAdmin());
+
+      allow list: if isVerifiedUser() && existing().ownerUid == request.auth.uid;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(logId) &&
+        isValidStudentLog(incoming()) &&
+        incoming().id == logId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(logId) &&
+        isValidStudentLog(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (
+            existing().ownerUid == request.auth.uid &&
+            incoming().ownerUid == existing().ownerUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'studentName',
+              'totalPoints',
+              'completedScenariosCount',
+              'completedAt',
+              'history',
+              'updatedAt'
+            ])
+          ) ||
+          isAdmin()
+        );
+
+      allow delete: if isVerifiedUser() &&
+        isValidId(logId) &&
+        (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+  }
+}
